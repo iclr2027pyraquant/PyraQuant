@@ -65,8 +65,25 @@ SDXL examples), `--n`/`--offset`, `--seed` (default 42), `--config` (default
 `configs/<pipeline>_pyraquant.json`), `--save-masks` (also writes the per-stage active / high-precision
 leaf maps as PNG), `--local-files-only`.
 
+The evaluation prompts of the paper are in `prompts/eval_ultrahr_2000.jsonl` (2,000 UltraHR-100K
+captions); all generations use seed 42 (`--seed`), for every compared method.
+
 Outputs: `<name>_4096.png` per prompt and a `records.json` with the per-stage coverage
 (high / low / cached fraction of the canvas).
+
+### Threshold calibration
+
+The relative-gap threshold τ is selected on 32 COCO captions (`prompts/calibration_coco32.jsonl`)
+that are disjoint from the evaluation prompts:
+
+```bash
+python tools/threshold_sweep.py --pipeline sdxl --taus 0.03 0.05 0.10 0.15 --output-dir outputs/sweep_sdxl
+python tools/threshold_sweep.py --pipeline flux --taus 0.05 0.10 0.20 --output-dir outputs/sweep_flux --svdquant-dir ckpt/svdquant_flux_w4a4
+```
+
+Each τ runs the main configuration with that threshold on the calibration captions and
+`sweep_summary.json` reports the mean allocation per stage (high / low / cached fractions) and the
+computed fraction of the 4K canvas.
 
 ## 4. Where the method lives
 
