@@ -9,8 +9,8 @@ two **main configurations** reported in the paper:
 | FLUX (DiT) | ScaleDiff-FLUX.1-schnell, 4/2/2 steps at 1K/2K/4K | released SVDQuant W4A4 | nested W3 (derived from the stored W4 codes) | yes (4K stage) |
 | SDXL (UNet) | ScaleDiff-SDXL, 50/20/20 steps at 1K/2K/4K | round-to-nearest W8A8 (group 32) | nested W4 (re-rounded from the W8 codes) | yes (4K stage) |
 
-Each script generates 4096 × 4096 images for a few example prompts.  Ablations, hyper-parameter
-sweeps, competitor baselines and the INT8 deployment executor are **not** included.
+Each script generates 4096 × 4096 images for a few example prompts.  Ablations, competitor
+baselines and the INT8 deployment executor are **not** included.
 
 Precision is simulated with quantize–dequantize (QDQ) weights and activations, exactly as in the
 paper's quality experiments; no low-bit kernels are required.
@@ -65,8 +65,8 @@ SDXL examples), `--n`/`--offset`, `--seed` (default 42), `--config` (default
 `configs/<pipeline>_pyraquant.json`), `--save-masks` (also writes the per-stage active / high-precision
 leaf maps as PNG), `--local-files-only`.
 
-The evaluation prompts of the paper are in `prompts/eval_ultrahr_2000.jsonl` (2,000 UltraHR-100K
-captions); all generations use seed 42 (`--seed`), for every compared method.
+The evaluation prompts of the paper are in `prompts/eval_ultrahr_2000.jsonl` (the 2,000 UltraHR-eval4K
+prompts, in the order used by the paper); all generations use seed 42 (`--seed`), for every compared method.
 
 Outputs: `<name>_4096.png` per prompt and a `records.json` with the per-stage coverage
 (high / low / cached fraction of the canvas).
@@ -81,9 +81,12 @@ python tools/threshold_sweep.py --pipeline sdxl --taus 0.03 0.05 0.10 0.15 --out
 python tools/threshold_sweep.py --pipeline flux --taus 0.05 0.10 0.20 --output-dir outputs/sweep_flux --svdquant-dir ckpt/svdquant_flux_w4a4
 ```
 
-Each τ runs the main configuration with that threshold on the calibration captions and
-`sweep_summary.json` reports the mean allocation per stage (high / low / cached fractions) and the
-computed fraction of the 4K canvas.
+Each τ runs the main configuration with that threshold at the 2K and 4K stages on the calibration
+captions; `sweep_summary.json` reports the mean allocation per stage (high / low / cached fractions)
+and the computed fraction of the 4K canvas.  For SDXL the sweep re-applies the sibling test at 4K
+(the sweep rows of the paper's threshold table); the final recipe keeps all inherited children
+active and is reproduced with `--keep-4k-rule`, e.g.
+`python tools/threshold_sweep.py --pipeline sdxl --taus 0.10 --keep-4k-rule --output-dir outputs/sweep_sdxl_final`.
 
 ## 4. Where the method lives
 
