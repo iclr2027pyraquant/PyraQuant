@@ -9,7 +9,8 @@ high-resolution diffusion (1K → 2K → 4K).  Inference code for the two main c
 | SDXL (UNet) | ScaleDiff-SDXL, 50/20/20 steps at 1K/2K/4K | round-to-nearest W8A8 (group 32) | nested W4 (re-rounded from the W8 codes) | yes (4K stage) |
 
 Precision is simulated with quantize–dequantize (QDQ) weights and activations, as in the paper's
-quality experiments; no low-bit kernels are required.
+quality experiments; the quality scripts need no low-bit kernels.  The INT8 latency executor of the
+deployment table is in `deploy/` (section 5).
 
 ## Contents
 
@@ -24,13 +25,16 @@ quality experiments; no low-bit kernels are required.
 | `prompts/calibration_coco32.jsonl` | the 32 COCO captions used to select τ |
 | `tools/threshold_sweep.py` | threshold sweep on the calibration captions |
 | `tools/svdquant_export.py`, `tools/svdquant_unpack.py` | conversion of the released SVDQuant checkpoint into the package read by `run_flux.py` |
+| `deploy/int8_exec.py` | INT8 kernels (Triton): per-token activation quantization, fused INT8 GEMM with dequant epilogue and low-rank up-projection, `Int8Linear` |
+| `deploy/run_flux_latency.py`, `deploy/run_sdxl_latency.py` | latency drivers of the deployment table and the decomposition ladder |
 
 All generations use seed 42 (`--seed`).
 
 ## 1. Environment
 
 Python 3.11, CUDA 12.x, one 24 GB GPU.  FLUX runs with sequential CPU offload and keeps the
-transformer and its nested-W3 copy in host memory (≥ 96 GB of host RAM recommended).
+transformer and its nested-W3 copy in host memory (≥ 96 GB of host RAM recommended).  The latency
+executor in `deploy/` needs one 48 GB GPU with all weights resident.
 
 ```bash
 conda create -n pyraquant python=3.11 -y
@@ -98,7 +102,42 @@ keeps the 4K rule of the config instead (for SDXL: the final recipe).
 | RTN W8A8 (g32) and nested W4 for SDXL | `build_recipe_variant` in `pyraquant/sim_recipes.py` (`rtn`, `nested4`) |
 | Activation fake-quantization hooks | `_ActFakeQuant` / `_ActFakeQuantConv` in `pyraquant/quant_unet.py` (SDXL), `ExtActQuant` in `pyraquant/external_quant.py` (FLUX) |
 
-## 5. Licenses
+## 5. Latency executor
+
+`deploy/` is the INT8 executor used for the deployment table and the latency decomposition ladder
+of the appendix (packed INT8 weights, Triton kernels, the hi/lo dual pass collapsed into one INT8
+pass; convolutions and attention in 16 bit).  Triton 3.2 comes with `torch==2.6.0`.
+
+```bash
+export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
+M="--weight-source method --svdquant-dir ckpt/svdquant_flux_w4a4"
+
+# deployment table, FLUX (20 timed prompts = the first 20 of prompts/eval_ultrahr_2000.jsonl, after 1 warm-up)
+python deploy/run_flux_latency.py --executor bf16 --n 20 --warmup 1 --out-dir outputs/latency_flux/bf16_full
+python deploy/run_flux_latency.py --executor ours $M --tau 0.10 --route-halo 2 --n 20 --warmup 1 --out-dir outputs/latency_flux/int8_routed_cache
+
+# deployment table, SDXL
+python deploy/run_sdxl_latency.py --arm fp16_full --n 20 --warmup 1 --out-dir outputs/latency_sdxl/fp16_full
+python deploy/run_sdxl_latency.py --arm int8_routed_cache --weight-source method --cascade --tau 0.10 --route-halo 8 --n 20 --warmup 1 --out-dir outputs/latency_sdxl/int8_routed_cache
+
+# decomposition ladder (appendix): remaining rungs, then the summary
+python deploy/run_flux_latency.py --executor int8 $M --n 20 --warmup 1 --out-dir outputs/latency_flux/int8_full
+python deploy/run_flux_latency.py --executor ours $M --no-cache --tau 0.10 --route-halo 2 --n 20 --warmup 1 --out-dir outputs/latency_flux/int8_routed_nocache
+python deploy/run_flux_latency.py --executor ours --linear bf16 --tau 0.10 --route-halo 2 --n 20 --warmup 1 --out-dir outputs/latency_flux/bf16_routed_cache
+python deploy/run_flux_latency.py --breakdown --out-dir outputs/latency_flux
+python deploy/run_sdxl_latency.py --arm int8_full --weight-source method --n 20 --warmup 1 --out-dir outputs/latency_sdxl/int8_full
+python deploy/run_sdxl_latency.py --arm int8_routed_nocache --weight-source method --cascade --tau 0.10 --route-halo 8 --n 20 --warmup 1 --out-dir outputs/latency_sdxl/int8_routed_nocache
+python deploy/run_sdxl_latency.py --arm fp16_routed_cache --cascade --tau 0.10 --route-halo 8 --n 20 --warmup 1 --out-dir outputs/latency_sdxl/fp16_routed_cache
+python deploy/run_sdxl_latency.py --breakdown --out-dir outputs/latency_sdxl
+
+# kernel self-test / micro-benchmark
+python deploy/int8_exec.py kernel_bench.json
+```
+
+Each run writes per-prompt records and the warm-up image into its `--out-dir`; `--breakdown` writes
+`summary.md` and a JSON with the median over the timed prompts.
+
+## 6. Licenses
 
 `flux/pipeline_flux.py`, `flux/transformer_flux.py`, `sdxl/pipeline_sdxl.py` and
 `sdxl/attention_scalediff.py` are derived from ScaleDiff and the Hugging Face diffusers library

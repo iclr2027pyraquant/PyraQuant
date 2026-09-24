@@ -10,3 +10,4 @@ einops==0.8.1
 numpy==2.3.4
 pillow==11.3.0
 scipy==1.16.1
+triton==3.2.0
