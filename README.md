@@ -7,7 +7,7 @@ two **main configurations** reported in the paper:
 | Pipeline | Backbone | Base quantizer | Low-precision state | Cached regions |
 |---|---|---|---|---|
 | FLUX (DiT) | ScaleDiff-FLUX.1-schnell, 4/2/2 steps at 1K/2K/4K | released SVDQuant W4A4 | nested W3 (derived from the stored W4 codes) | yes (4K stage) |
-| SDXL (UNet) | ScaleDiff-SDXL, 50/20/20 steps at 1K/2K/4K | round-to-nearest W8A8 (group 32 on linear layers; convolutions W8A8, group 128 with per-channel fallback) | nested W4 (re-rounded from the W8 codes) | yes (4K stage) |
+| SDXL (UNet) | ScaleDiff-SDXL, 50/20/20 steps at 1K/2K/4K | round-to-nearest W8A8 (group 32) | nested W4 (re-rounded from the W8 codes) | yes (4K stage) |
 
 Each script generates 4096 × 4096 images for a few example prompts.  Ablations, hyper-parameter
 sweeps, competitor baselines and the INT8 deployment executor are **not** included.
@@ -25,9 +25,8 @@ conda activate pyraquant
 pip install -r requirements.txt
 ```
 
-Hardware used for the paper's quality runs: one 24 GB GPU (NVIDIA RTX A5000).
-FLUX runs with sequential CPU offload and keeps the bf16 transformer and its nested-W3 copy in
-host memory, so **≥ 96 GB of host RAM** is recommended; SDXL needs ≈ 32 GB of host RAM.
+A single 24 GB GPU is sufficient.  FLUX runs with sequential CPU offload and keeps the transformer
+and its nested-W3 copy in host memory (≥ 96 GB of host RAM recommended).
 
 ## 2. Models
 
@@ -36,21 +35,19 @@ Both scripts download from the Hugging Face Hub unless `--local-files-only` is g
 * **FLUX.1-schnell** (`black-forest-labs/FLUX.1-schnell`, revision `741f7c3ce8b383c54771c7003378a50191e9efe9`)
 * **SDXL base 1.0** (`stabilityai/stable-diffusion-xl-base-1.0`, revision `462165984030d82259a11f4367a4eed129e94a7b`, fp16 variant)
 * **SVDQuant W4A4 package for FLUX.1-schnell** (required by `flux/run_flux.py --svdquant-dir`).
-  This is the released checkpoint `mit-han-lab/svdq-int4-flux.1-schnell` converted into a
-  framework-neutral "external-quant" package (dequantized weights + activation scales + low-rank
-  branches; ≈ 24 GB).  Two ways to obtain it:
-  1. download the ready-made package (anonymous link given in the supplementary material), or
-  2. build it yourself from the released checkpoint:
-     ```bash
-     # deepcompressor provides the nunchaku tile layout; install it without its (unpinned) dependencies
-     pip install --no-deps git+https://github.com/mit-han-lab/deepcompressor@69f3473f5e1c1504bae35cc50c7858ef900a9b17
-     hf download mit-han-lab/svdq-int4-flux.1-schnell --local-dir ckpt/svdq-int4-flux.1-schnell
-     python tools/svdquant_export.py --ckpt ckpt/svdq-int4-flux.1-schnell --out ckpt/svdquant_flux_w4a4
-     ```
-     The same checkpoint is also published as a single file in `nunchaku-tech/nunchaku-flux.1-schnell`
-     (`svdq-int4_r32-flux.1-schnell.safetensors`, identical per-block tensors); pass that file directly to `--ckpt`.
-     ```bash
-     ```
+  The FLUX base quantizer is the released SVDQuant checkpoint `mit-han-lab/svdq-int4-flux.1-schnell`.
+  Its kernel-packed tensors are converted once into a framework-neutral "external-quant" package
+  (dequantized bf16 weights + activation scales + low-rank branches, ≈ 24 GB on disk) that the
+  QDQ simulation reads:
+  ```bash
+  # deepcompressor provides the nunchaku tile layout; install it without its (unpinned) dependencies
+  pip install --no-deps git+https://github.com/mit-han-lab/deepcompressor@69f3473f5e1c1504bae35cc50c7858ef900a9b17
+  hf download mit-han-lab/svdq-int4-flux.1-schnell --local-dir ckpt/svdq-int4-flux.1-schnell
+  python tools/svdquant_export.py --ckpt ckpt/svdq-int4-flux.1-schnell --out ckpt/svdquant_flux_w4a4
+  ```
+  The conversion runs on the CPU.  The same checkpoint is also published as a single file in
+  `nunchaku-tech/nunchaku-flux.1-schnell` (`svdq-int4_r32-flux.1-schnell.safetensors`); that file
+  can be passed directly to `--ckpt`.
 
 ## 3. Run
 
@@ -69,12 +66,7 @@ SDXL examples), `--n`/`--offset`, `--seed` (default 42), `--config` (default
 leaf maps as PNG), `--local-files-only`.
 
 Outputs: `<name>_4096.png` per prompt and a `records.json` with the per-stage coverage
-(high / low / cached fraction of the canvas), the nominal weight bit-width of the computed area
-(coverage-weighted 4/3 or 8/4; the paper's effective bit-widths and BOPs additionally account for
-scales and low-rank factors and are produced by a separate accounting script) and the wall-clock time.
-
-Approximate cost on one RTX A5000 (24 GB): SDXL 7–12 min per image (peak 16 GB GPU memory);
-FLUX FLUX_COST_PLACEHOLDER (sequential CPU offload).
+(high / low / cached fraction of the canvas).
 
 ## 4. Where the method lives
 
@@ -93,11 +85,6 @@ FLUX FLUX_COST_PLACEHOLDER (sequential CPU offload).
 
 The stage plans (which precision state is used at 1K / 2K / 4K, the thresholds, the executor and
 the halo) are in `configs/flux_pyraquant.json` and `configs/sdxl_pyraquant.json`.
-
-Implementation notes: both the precision mask and the cache mask are feathered with a 16-latent box
-filter at leaf boundaries (`mask_edge`); coverage is reported from the hard leaf maps.  The cache
-reference is refreshed every step with the structure-guided prediction, which equals the stage-entry
-prediction inside fully cached regions.
 
 ## 5. Acknowledgements and licenses
 

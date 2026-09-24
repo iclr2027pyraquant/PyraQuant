@@ -423,7 +423,7 @@ def main() -> int:
         args.model_id, revision=args.model_revision, subfolder="transformer",
         torch_dtype=torch.bfloat16, local_files_only=args.local_files_only)
     ext_summary = apply_external_quant(transformer, str(args.svdquant_dir))
-    print(f"[pyraquant] base quantizer: {ext_summary.get('method')} W{ext_summary.get('w_bits')}A{ext_summary.get('a_bits')}", flush=True)
+    print(f"[pyraquant] base quantizer: {ext_summary.get('method')} W{int(ext_summary.get('w_bits'))}A{int(ext_summary.get('a_bits'))}", flush=True)
     variants = build_variants(transformer, cfg["variants"], str(args.svdquant_dir), plan)
     wrapper = SpatialMaskTransformer(variants, plan, base_name="bf16", sync_dual_pass_rng=True)
 
