@@ -1,0 +1,20 @@
+{
+  "pipeline": "sdxl",
+  "steps": 50,
+  "guidance_scale": 7.5,
+  "restart_ratio": 0.4,
+  "leaf_latent": 64,
+  "mask_edge": 16,
+  "conv_bits": 8,
+  "executor": "routed",
+  "route_halo_latent": 8,
+  "route_batch": 4,
+  "route_min_leaf": 2,
+  "variants": {"w8a8": "rtn:g32", "w4a8": "nested4:g32"},
+  "plan": {
+    "128": {"mode": "uniform", "v": "w8a8"},
+    "256": {"mode": "spatial", "hi": "w8a8", "lo": "w4a8", "score": "residual", "thresh": 0.1, "norm": "relgap"},
+    "512": {"mode": "spatial", "hi": "w8a8", "lo": "w4a8", "score": "residual",
+            "inherit_hi": true, "inner_thresh": 1.0, "inner_norm": "median", "cache_bg": true}
+  }
+}
