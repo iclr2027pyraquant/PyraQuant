@@ -173,7 +173,7 @@ class SpatialMaskTransformer(nn.Module):
 
 # ---------------------------------------------------------------------------
 def leaf_scores_residual(latents_LFM: torch.Tensor, latents_LU: torch.Tensor, n_leaf: int) -> torch.Tensor:
-    """Residual energy e(B): RMS of (L_FM - L_U) over each leaf -> [n, n]."""
+    """Residual magnitude e(B): RMS of (L_FM - L_U) over each leaf -> [n, n]."""
     d = (latents_LFM.float() - latents_LU.float()).pow(2).mean(dim=1)[0]   # [H, W]
     b = d.shape[0] // n_leaf
     blocks = d.view(n_leaf, b, n_leaf, b).permute(0, 2, 1, 3).reshape(n_leaf, n_leaf, -1)

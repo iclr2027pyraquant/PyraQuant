@@ -579,7 +579,7 @@ class FluxPipeline(FluxPipeline):
                         step_transformer_forward_calls = 1
                     highres_transformer_forward_calls += step_transformer_forward_calls
 
-                    # [QUANT] cached-reuse path: leaves with low residual energy are not
+                    # [QUANT] cached-reuse path: leaves with low residual magnitude are not
                     # denoised; their velocity is recovered from the previous x0 via
                     # v = (xt - x0) / sigma (same construction as the SDXL cache path).
                     if getattr(self, "_cache_mask", None) is not None:
